@@ -24,6 +24,14 @@ counter_orders = Counter('orders', 'Calls to orders')
 counter_highest_spenders = Counter('highest_spenders', 'Calls to highest spenders report')
 counter_best_sellers = Counter('best_sellers', 'Calls to best sellers report')
 
+import time
+
+@app.get('/test/slow/<int:delay_seconds>')
+def test_slow_endpoint(delay_seconds):
+    """Endpoint pour tester les timeouts"""
+    time.sleep(delay_seconds)  # Simule une opération lente
+    return {"message": f"Response after {delay_seconds} seconds"}, 200
+
 @app.get('/health-check')
 def health():
     """Return OK if app is up and running"""

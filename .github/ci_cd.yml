@@ -1,0 +1,95 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # Tests automatisés
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: labo05_db
+          MYSQL_USER: labo05
+          MYSQL_PASSWORD: labo05
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v4  # Récupérer le code
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies  # Installer les packages Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Create .env file  # Configuration pour les tests
+        run: |
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DB_NAME=labo05_db" >> .env
+          echo "DB_USER=labo05" >> .env
+          echo "DB_PASSWORD=labo05" >> .env
+          echo "REDIS_HOST=127.0.0.1" >> .env
+          echo "REDIS_PORT=6379" >> .env
+          echo "REDIS_DB=0" >> .env
+
+      - name: Wait for services  # Attendre que MySQL/Redis soient prêts
+        run: |
+          sleep 10
+          mysql -h 127.0.0.1 -u labo05 -p labo05 -e "SELECT 1;" labo05_db
+
+      - name: Run tests  # Lancer les tests
+        run: |
+          cd src
+          python -m pytest tests/ -v
+
+  # Déploiement automatique
+  deploy:
+    runs-on: self-hosted
+    needs: test  # Déploie seulement si tests OK
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - uses: actions/checkout@v4  # Récupérer le code sur le serveur
+
+      - name: Create network  # Créer le réseau Docker
+        run: docker network create labo05-network || true
+
+      - name: Stop old containers  # Arrêter les anciens services
+        run: |
+          docker-compose down || true
+          docker system prune -f
+
+      - name: Start services  # Démarrer les nouveaux services
+        run: docker-compose up -d --build
+
+      - name: Wait for startup  # Attendre le démarrage
+        run: |
+          sleep 30
+          docker-compose ps
+
+      - name: Health check  # Vérifier que tout fonctionne
+        run: |
+          curl -f http://localhost:5000/health-check || exit 1
+          curl -f http://localhost:8080/health || exit 1
